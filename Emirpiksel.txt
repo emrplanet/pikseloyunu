@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Pixel Painter</title>
+    <style>
+        .pixel {
+            width: 20px;
+            height: 20px;
+            border: 1px solid #ddd;
+            display: inline-block;
+        }
+        .colorPicker {
+            display: flex;
+            justify-content: space-between;
+            width: 200px;
+            margin-top: 10px;
+        }
+        .worldMap {
+            margin-top: 20px;
+        }
+        .chatContainer {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            padding: 10px;
+            height: 200px;
+            overflow-y: scroll;
+        }
+    </style>
+</head>
+<body>
+    <h1>Online Pixel Painter</h1>
+    <div id="pixelCanvas">
+        <!-- Pixel table will be generated here -->
+    </div>
+    <div class="colorPicker">
+        <!-- Color palette -->
+    </div>
+    <div class="worldMap">
+        <img src="world_map_white.png" alt="World Map" id="worldMap">
+    </div>
+    <div class="chatContainer" id="chatContainer">
+        <!-- Chat messages will be displayed here -->
+    </div>
+    <div id="playerInfo">
+        <p>Kullanıcı Konumları:</p>
+        <ul id="playerLocations"></ul>
+        <p>Aktif Oyuncu Sayısı: <span id="activePlayerCount">0</span></p>
+    </div>
+    <input type="text" id="messageInput" placeholder="Type a message...">
+    <button onclick="sendMessage()">Send</button>
+    <script>
+        const ws = new WebSocket('ws://localhost:8080');
+        let pixelTable = [];
+        let selectedColor = '#ff0000'; // Default color: red
+        let playerLocations = {};
+
+        // Initialize pixel table
+        function initializePixelTable(tableData) {
+            pixelTable = tableData;
+            renderPixelTable();
+        }
+
+        // Render pixel table
+        function renderPixelTable() {
+            const pixelCanvas = document.getElementById('pixelCanvas');
+            pixelCanvas.innerHTML = '';
+
+            pixelTable.forEach((row, rowIndex) => {
+                row.forEach((color, colIndex) => {
+                    const pixel = document.createElement('div');
+                    pixel.className = 'pixel';
+                    pixel.style.backgroundColor = color;
+                    pixel.addEventListener('click', () => {
+                        updatePixel(rowIndex, colIndex, selectedColor);
+                    });
+                    pixelCanvas.appendChild(pixel);
+                });
+                pixelCanvas.appendChild(document.createElement('br'));
+            });
+        }
+
+        // Update selected color
+        function setColor(color) {
+            selectedColor = color;
+        }
+
+        // Update pixel color and send to server
+        function updatePixel(x, y, color) {
+            pixelTable[x][y] = color;
+            ws.send(JSON.stringify({ type: 'updatePixel', data: { x, y, color } }));
+            renderPixelTable();
+        }
+
+        // Update player location and send to server
+        function updatePlayerLocation(x, y) {
+            playerLocations[ws.id] = { x, y };
+            ws.send(JSON.stringify({ type: 'updatePlayerLocation', data: { id: ws.id, x, y } }));
+            renderPlayerLocations();
+        }
+
+        // Render player locations
+        function renderPlayerLocations() {
+            const playerLocationsList = document.getElementById('playerLocations');
+            playerLocationsList.innerHTML = '';
+            Object.keys(playerLocations).forEach((id) => {
+                const location = playerLocations[id];
+                const listItem = document.createElement('li');
+                listItem.textContent = `ID: ${id}, X: ${location.x}, Y: ${location.y}`;
+                playerLocationsList.appendChild(listItem);
+            });
+        }
+
+        // Update active player count
+        function updateActivePlayerCount(count) {
+            const activePlayerCountElement = document.getElementById('activePlayerCount');
+            activePlayerCountElement.textContent = count;
+        }
+
+        // Handle incoming messages from server
+        ws.onmessage = function(event) {
+            const message = JSON.parse(event.data);
+            if (message.type === 'initialPixelTable') {
+                initializePixelTable(message.data);
+            } else if (message.type === 'updatePixel') {
+                const { x, y, color } = message.data;
+                pixelTable[x][y] = color;
+                renderPixelTable();
+            } else if (message.type === 'chatMessage') {
+                const chatContainer = document.getElementById('chatContainer');
+                const messageElement = document.createElement('p');
+                messageElement.textContent = message.data;
+                chatContainer.appendChild(messageElement);
+                chatContainer.scrollTop = chatContainer.scrollHeight; // Scroll to bottom
+            } else if (message.type === 'playerConnected') {
+                playerLocations[message.data.id] = { x: 0, y: 0 }; // Initialize player location
+                renderPlayerLocations();
+                updateActivePlayerCount(Object.keys(playerLocations).length);
+            } else if (message.type === 'playerDisconnected') {
+                delete playerLocations[message.data.id];
+                renderPlayerLocations();
+                updateActivePlayerCount(Object.keys(playerLocations).length);
+            } else if (message.type === 'updatePlayerLocation') {
+                const { id, x, y } = message.data;
+                playerLocations[id] = { x, y };
+                renderPlayerLocations();
+            }
+        };
+
+        // Send chat message to server
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value;
+            if (message.trim() !== '') {
+                ws.send(JSON.stringify({ type: 'chatMessage', data: message }));
+                messageInput.value = '';
+            }
+        }
+
+        // Update player location when clicking on pixel
+        document.getElementById('pixelCanvas').addEventListener('click', function(event) {
+            const x = Math.floor(event.offsetY / 20);
+            const y = Math.floor(event.offsetX / 20);
+            updatePlayerLocation(x, y);
+        });
+    </script>
+</body>
+</html>
